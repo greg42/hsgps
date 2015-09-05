@@ -9,7 +9,7 @@
 
 {-| A simple client for gpsd -}
 module Network.Gpsd (  GPSContext, initGps, GPSPosition(..), getPosition
-                     , getTime, getSpeed) where
+                     , getTime, getSpeed, waitForFix) where
 
 import           Control.Concurrent.STM.TChan
 import           Control.Concurrent.STM.TVar
@@ -25,6 +25,7 @@ import qualified Data.ByteString.Char8 as C8
 import           Control.Applicative hiding (many)
 import           Control.Monad
 import           System.IO
+import           Data.Maybe
 
 data GPSData = TPVData {
       gTime     :: Maybe String
@@ -131,6 +132,14 @@ getTime ctx = readTVarIO (curTime ctx)
 -- | Gets the last known GPS speed
 getSpeed :: GPSContext -> IO (Maybe Double)
 getSpeed ctx = readTVarIO (curSpeed ctx)
+
+-- | Waits for a GPS fix
+waitForFix :: GPSContext -> IO ()
+waitForFix ctx = atomically $ do
+   p <- readTVar (curPosition ctx)
+   s <- readTVar (curSpeed ctx)
+   check $ isJust p
+   check $ isJust s
 
 -- | Initialize a connection to gpsd.
 initGps ::    String -- ^ The host name to connect to
