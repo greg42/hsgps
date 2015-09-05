@@ -7,9 +7,12 @@ import           Control.Concurrent.STM
 import           Control.Concurrent
 import           Network.Simple.TCP
 import           Text.JSON
+import           Text.JSON.Parsec hiding (getPosition)
+import           Text.ParserCombinators.Parsec hiding (getPosition)
+import           Text.ParserCombinators.Parsec.Char
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C8
-import           Control.Applicative
+import           Control.Applicative hiding (many)
 import           Control.Monad
 import           System.IO
 
@@ -22,7 +25,7 @@ data GPSData = TPVData {
 data GPSPosition = GPSPosition {
      gpsLongitude :: Double
    , gpsLatitude  :: Double
-  }
+  } deriving (Show, Eq)
 
 data GPSContext = GPSContext {
       curPosition :: TVar (Maybe GPSPosition)
@@ -30,8 +33,17 @@ data GPSContext = GPSContext {
     , curTime     :: TVar (Maybe String)
    }
 
-getJson :: (JSON a) => BS.ByteString -> Either String a
-getJson = resultToEither . decode . C8.unpack
+parseJSON :: CharParser () (JSValue, String)
+parseJSON = do
+   val  <- p_value
+   rest <- many $ noneOf ""
+   return (val, rest)
+
+getJson :: String -> Either String (JSValue, String)
+getJson input = 
+   case runParser parseJSON () "" input of
+      Left err -> Left $ show err
+      Right x  -> Right x
 
 myReadJSON :: (JSON a) => JSValue -> Either String a
 myReadJSON = resultToEither . readJSON
@@ -71,12 +83,14 @@ handleTPV' obj =
                                                              }
                            Nothing       -> Nothing
 
-handleJson :: JSObject JSValue -> Either String GPSData
-handleJson obj = 
-   case (lookupJson obj "class") of
-      Left  e     -> Left e
-      Right "TPV" -> handleTPV obj
-      Right x     -> Left $ "Unknown object class " ++ x
+handleJson :: JSValue -> Either String GPSData
+handleJson val = 
+   case myReadJSON val of
+      Left e -> Left e
+      Right obj -> case (lookupJson obj "class") of
+                     Left  e     -> Left e
+                     Right "TPV" -> handleTPV obj
+                     Right x     -> Left $ "Unknown object class " ++ x
 
 performUpdate :: GPSData -> GPSContext -> IO ()
 performUpdate info ctx = do
@@ -111,16 +125,21 @@ initGps server port = do
    let ctx = GPSContext { curPosition = p, curSpeed = s, curTime = t }
    (socket, _) <- connectSock server (show port)
    send socket $ C8.pack "?WATCH={\"enable\":true,\"json\":true}"
+   buf <- newTVarIO $ ""
    forkIO $ forever $ do
-      serverData <- recv socket 1024
+      serverData <- recv socket 8192
       case serverData of
          Nothing -> do closeSock socket
                        error "Connection closed"
-         Just sd -> process sd ctx
+         Just sd -> atomically $ modifyTVar buf (flip (++) (C8.unpack sd))
+      buffer <- readTVarIO buf
+      rest <- process buffer ctx
+      atomically $ writeTVar buf rest
    return ctx
    where process sd ctx = 
             case getJson sd of
-                 Left err -> return ()
-                 Right js -> do case handleJson js of
-                                  Left err -> hPutStrLn stderr $ "Error: " ++ err
-                                  Right gpsData -> performUpdate gpsData ctx
+                 Left err -> return sd
+                 Right (js, rest) -> do case handleJson js of
+                                          Left err -> return rest
+                                          Right gpsData -> do performUpdate gpsData ctx
+                                                              return rest
