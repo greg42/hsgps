@@ -1,4 +1,14 @@
-module Network.Gpsd (  GPSContext, initGps, GPSPosition, getPosition
+{- 
+ - ---------------------------------------------------------------------------- 
+ - "THE BEER-WARE LICENSE" (Revision 42): 
+ - <code@gregorkopf.de> wrote this file. As long as you retain this notice you 
+ - can do whatever you want with this stuff. If we meet some day, and you 
+ - think this stuff is worth it, you can buy me a beer in return. Gregor Kopf 
+ - ---------------------------------------------------------------------------- 
+ -} 
+
+{-| A simple client for gpsd -}
+module Network.Gpsd (  GPSContext, initGps, GPSPosition(..), getPosition
                      , getTime, getSpeed) where
 
 import           Control.Concurrent.STM.TChan
@@ -22,11 +32,13 @@ data GPSData = TPVData {
     , gSpeed    :: Maybe Double
    }
 
+-- | A GPS position as returned by gpsd.
 data GPSPosition = GPSPosition {
-     gpsLongitude :: Double
-   , gpsLatitude  :: Double
+     gpsLongitude :: Double -- ^ The longitude
+   , gpsLatitude  :: Double -- ^ The latitude
   } deriving (Show, Eq)
 
+-- | A GPSContext represents your connection to the GPS daemon.
 data GPSContext = GPSContext {
       curPosition :: TVar (Maybe GPSPosition)
     , curSpeed    :: TVar (Maybe Double)
@@ -108,16 +120,22 @@ updateTPV TPVData { gTime = t, gPosition = p, gSpeed = s} ctx = do
                                Nothing -> return ()
 updateTPV _ _ = return ()
 
+-- | Gets the last known GPS position
 getPosition :: GPSContext -> IO (Maybe GPSPosition)
 getPosition ctx = readTVarIO (curPosition ctx)
 
+-- | Gets the last known GPS time
 getTime :: GPSContext -> IO (Maybe String)
 getTime ctx = readTVarIO (curTime ctx)
 
+-- | Gets the last known GPS speed
 getSpeed :: GPSContext -> IO (Maybe Double)
 getSpeed ctx = readTVarIO (curSpeed ctx)
 
-initGps :: String -> Int -> IO GPSContext
+-- | Initialize a connection to gpsd.
+initGps ::    String -- ^ The host name to connect to
+           -> Int -- ^ The port number
+           -> IO GPSContext -- ^ The resulting GPSContext
 initGps server port = do
    p <- newTVarIO Nothing
    s <- newTVarIO Nothing
