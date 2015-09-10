@@ -167,6 +167,6 @@ initGps server port = do
             case getJson sd of
                  Left err -> return sd
                  Right (js, rest) -> do case handleJson js of
-                                          Left err -> return rest
+                                          Left err -> process rest ctx
                                           Right gpsData -> do performUpdate gpsData ctx
-                                                              return rest
+                                                              process rest ctx
